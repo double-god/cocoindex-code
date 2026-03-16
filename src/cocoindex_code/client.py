@@ -26,6 +26,8 @@ from .protocol import (
     IndexWaitingNotice,
     ProjectStatusRequest,
     ProjectStatusResponse,
+    RemoveProjectRequest,
+    RemoveProjectResponse,
     Request,
     Response,
     SearchRequest,
@@ -72,7 +74,10 @@ class DaemonClient:
         """Request indexing with streaming progress. Blocks until complete."""
         self._conn.send_bytes(encode_request(IndexRequest(project_root=project_root)))
         while True:
-            data = self._conn.recv_bytes()
+            try:
+                data = self._conn.recv_bytes()
+            except EOFError:
+                raise RuntimeError("Connection to daemon lost during indexing")
             resp = decode_response(data)
             if isinstance(resp, ErrorResponse):
                 raise RuntimeError(f"Daemon error: {resp.message}")
@@ -120,6 +125,11 @@ class DaemonClient:
         from .protocol import DaemonStatusRequest
 
         return self._send(DaemonStatusRequest())  # type: ignore[return-value]
+
+    def remove_project(self, project_root: str) -> RemoveProjectResponse:
+        return self._send(  # type: ignore[return-value]
+            RemoveProjectRequest(project_root=project_root)
+        )
 
     def stop(self) -> StopResponse:
         return self._send(StopRequest())  # type: ignore[return-value]
@@ -236,7 +246,7 @@ def stop_daemon() -> None:
         pass
 
 
-def _wait_for_daemon(timeout: float = 5.0) -> None:
+def _wait_for_daemon(timeout: float = 10.0) -> None:
     """Wait for the daemon socket/pipe to become available."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
