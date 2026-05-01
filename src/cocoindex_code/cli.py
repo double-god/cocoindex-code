@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import json
 import os
 import sys
 from collections.abc import Callable
@@ -898,6 +899,58 @@ def daemon_stop() -> None:
         _typer.echo("Warning: daemon may not have stopped cleanly.", err=True)
     else:
         _typer.echo("Daemon stopped.")
+
+
+@app.command("kit-extract")
+def kit_extract(
+    path: str = _typer.Argument(..., help="Path to the codebase directory to extract"),
+) -> None:
+    """Extract AST semantic information from codebase (headless mode for Kit engine).
+
+    Outputs structured AST information as JSONL to stdout. No other output is produced.
+    Each line is a JSON object with: file_path, symbol_name, node_type, ast_content, dependencies.
+    """
+    import sys
+
+    from .ast_extractor import walk_and_extract
+
+    target_path = Path(path).resolve()
+
+    if not target_path.exists():
+        _typer.echo(f"Error: Path does not exist: {path}", err=True)
+        raise _typer.Exit(code=1)
+
+    if not target_path.is_dir():
+        _typer.echo(f"Error: Path is not a directory: {path}", err=True)
+        raise _typer.Exit(code=1)
+
+    # Completely silence all output except stdout JSONL
+    # Redirect any stderr logging to devnull
+    import io
+    import logging
+
+    # Disable all logging
+    logging.disable(logging.CRITICAL)
+
+    # Null out stderr to catch any stray output
+    original_stderr = sys.stderr
+    sys.stderr = io.StringIO()
+
+    try:
+        # Stream JSONL output
+        for node in walk_and_extract(target_path):
+            # Output each node as a JSON line
+            print(json.dumps(node, ensure_ascii=False))
+            # Flush immediately for streaming
+            sys.stdout.flush()
+    except Exception as e:
+        # Restore stderr for error reporting
+        sys.stderr = original_stderr
+        _typer.echo(f"Error during extraction: {e}", err=True)
+        raise _typer.Exit(code=1)
+    finally:
+        # Restore stderr
+        sys.stderr = original_stderr
 
 
 @app.command("run-daemon", hidden=True)
